@@ -6,6 +6,6 @@
 
 """Crisisroom environment server components."""
 
-from .CrisisRoom_environment import CrisisroomEnv
+from .CrisisRoom_environment import CrisisRoomEnv
 
 __all__ = ["CrisisroomEnvironment"]
