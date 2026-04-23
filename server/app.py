@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 # ── Import env from the openenv-init generated file ───────────────────────────
-from CrisisRoom_environment import (
+from server.CrisisRoom_environment import (
     CrisisRoomEnv,
     ALL_SCENARIOS,
     SERVICES,
