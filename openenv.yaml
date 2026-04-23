@@ -1,0 +1,11 @@
+spec_version: 1
+name: CrisisRoom
+description: >
+  SRE Incident Response RL Environment. LLM agent diagnoses
+  production incidents in a partially observable system using
+  tool calls, causal reasoning, and targeted remediation.
+  Theme 3.1 - World Modeling: Professional Tasks.
+type: space
+runtime: fastapi
+app: server.app:app
+port: 7860

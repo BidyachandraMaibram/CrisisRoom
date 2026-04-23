@@ -1,0 +1,21 @@
+# CrisisRoom – SRE Incident Response RL Environment
+# Core runtime
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.0
+requests>=2.31.0
+
+# Training stack
+torch>=2.2.0
+transformers>=4.41.0
+trl>=0.9.0
+peft>=0.11.0
+datasets>=2.19.0
+accelerate>=0.30.0
+bitsandbytes>=0.43.0
+
+# Unsloth (install separately with: pip install unsloth)
+# unsloth
+
+# Utilities
+numpy>=1.26.0
