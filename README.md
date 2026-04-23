@@ -1,3 +1,13 @@
+---
+title: CrisisRoom
+emoji: 🚨
+colorFrom: blue
+colorTo: red
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 🚨 CrisisRoom – SRE Incident Response RL Environment
 
 > **Hackathon Theme**: World Modeling – Professional Tasks (Theme 3.1)  
