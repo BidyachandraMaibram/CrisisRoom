@@ -55,14 +55,14 @@ TRAINING_CONFIG = {
     "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
 
     # --- Training ---
-    "total_steps": 500,
-    "eval_every_n_steps": 100,
-    "eval_episodes": 20,
-    "batch_size": 4,            # episodes per GRPO update
-    "num_generations": 4,       # GRPO group size
-    "max_new_tokens": 128,
+    "total_steps": 200,
+    "eval_every_n_steps": 50,
+    "eval_episodes": 10,
+    "batch_size": 1,            # episodes per GRPO update
+    "num_generations": 2,       # GRPO group size
+    "max_new_tokens": 64,
     "learning_rate": 5e-5,
-    "gradient_accumulation_steps": 2,
+    "gradient_accumulation_steps": 8,
     "warmup_steps": 20,
     "max_grad_norm": 0.5,
 
@@ -383,13 +383,13 @@ def _train_with_trl_grpo(
 
     grpo_config = GRPOConfig(
         output_dir=config["output_dir"],
-        num_train_epochs=1,
+        num_train_epochs=10,
         per_device_train_batch_size=config["batch_size"],
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
         learning_rate=config["learning_rate"],
         warmup_steps=config["warmup_steps"],
         max_grad_norm=config["max_grad_norm"],
-        logging_steps=10,
+        logging_steps=1,
         save_steps=config["save_every_n_steps"],
         num_generations=config["num_generations"],
         max_completion_length=config["max_new_tokens"],
@@ -496,7 +496,9 @@ def _train_with_trl_grpo(
     step_counter = [0]
 
     def patched_log(logs, *args, **kwargs):
-        step_counter[0] += 1
+        original_log(logs, *args, **kwargs)          # call first
+        step = logs.get("step", step_counter[0])
+        step_counter[0] = step
         step = step_counter[0]
 
         # Log per-component reward tracking
