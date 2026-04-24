@@ -239,7 +239,7 @@ def run_evaluation(
 ) -> Dict[str, float]:
     """Run evaluation episodes and return aggregate metrics."""
     from training.rollout import run_episode_rollout
-    from environment.scenarios import ALL_SCENARIOS
+    from server.CrisisRoom_environment import ALL_SCENARIOS
 
     metrics = {
         "mean_reward": 0.0,
@@ -308,7 +308,7 @@ def train_grpo(config: Dict[str, Any]):
         collect_rollouts_batch,
         SYSTEM_PROMPT,
     )
-    from environment.scenarios import ALL_SCENARIOS
+    from server.CrisisRoom_environment import ALL_SCENARIOS
 
     client = CrisisRoomClient(base_url=ENV_SERVER_URL)
     assert client.health(), "Environment server not reachable!"
@@ -392,7 +392,7 @@ def _train_with_trl_grpo(
         logging_steps=10,
         save_steps=config["save_every_n_steps"],
         num_generations=config["num_generations"],
-        max_new_tokens=config["max_new_tokens"],
+        max_completion_length=config["max_new_tokens"],
         temperature=0.7,
         top_p=0.9,
         report_to="none",   # set to "wandb" if using W&B
@@ -400,21 +400,35 @@ def _train_with_trl_grpo(
 
     # We implement a custom reward function that runs env rollouts
     # and returns per-sample rewards for GRPO
-    def reward_fn(prompts: List[str], completions: List[str], **kwargs) -> List[float]:
+    def reward_fn(prompts, completions, **kwargs) -> List[float]:
+        from training.rollout import build_conversation_messages, extract_action_from_response
+
         rewards = []
         for prompt, completion in zip(prompts, completions):
-            # Each GRPO sample is a (prompt, completion) pair
-            # We evaluate by running a fresh env episode with the completion as first action
             try:
-                obs = client.reset(curriculum_hint=(kwargs.get("step", 9999) < curriculum_cutoff))
-                action = completion.strip()
-                _, reward, done, info = client.step(action)
+                # TRL GRPOTrainer passes completions as List[List[Dict]] where each
+                # inner list is the assistant turn(s): [{"role": "assistant", "content": "..."}]
+                # We need to extract the raw text content before calling .strip().
+                if isinstance(completion, list):
+                    # Grab the last assistant message content
+                    content = next(
+                        (m["content"] for m in reversed(completion) if isinstance(m, dict)),
+                        "",
+                    )
+                elif isinstance(completion, dict):
+                    content = completion.get("content", "")
+                else:
+                    content = str(completion)
+
+                use_hint = kwargs.get("step", 9999) < curriculum_cutoff
+                obs = client.reset(curriculum_hint=use_hint)
+                action = extract_action_from_response(content)
+                next_obs, reward, done, info = client.step(action)
+
                 if not done:
-                    # Run remaining steps with model
-                    obs_hist = [obs, {"text": info.get("observation", "")}]
+                    obs_hist = [obs, next_obs]
                     act_hist = [action]
                     for _ in range(config["env_max_steps"] - 1):
-                        from training.rollout import build_conversation_messages, extract_action_from_response
                         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
                         messages += build_conversation_messages(obs_hist, act_hist)
                         raw = model_fn(messages)
@@ -425,7 +439,8 @@ def _train_with_trl_grpo(
                         if done:
                             reward = r
                             break
-                rewards.append(reward)
+
+                rewards.append(float(reward))
             except Exception as e:
                 logger.warning("Reward fn error: %s", e)
                 rewards.append(-4.0)
@@ -451,14 +466,19 @@ def _train_with_trl_grpo(
     if not seed_rollouts:
         raise RuntimeError("Could not collect any seed rollouts. Check env server.")
 
-    # Build HF dataset from prompt messages
+    # Build HF dataset from prompt messages.
+    # GRPOTrainer expects {"prompt": List[Dict]} (chat messages). Do NOT include
+    # extra columns like "reward" — GRPOTrainer computes rewards via reward_fn.
+    # Use only system + first user turn so the model generates the first action.
     dataset_records = []
     for rollout in seed_rollouts:
         if rollout.prompt_messages:
-            dataset_records.append({
-                "prompt": rollout.prompt_messages,
-                "reward": rollout.total_reward,
-            })
+            initial_prompt = [
+                m for m in rollout.prompt_messages
+                if m["role"] in ("system", "user")
+            ][:2]  # system message + first observation
+            if initial_prompt:
+                dataset_records.append({"prompt": initial_prompt})
 
     dataset = Dataset.from_list(dataset_records)
 
