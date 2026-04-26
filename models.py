@@ -33,6 +33,10 @@ class StepRequest(BaseModel):
         description="Action in format: 'ACTION: TOOL_NAME: argument'",
         examples=["ACTION: CHECK_METRICS: app", "ACTION: DIAGNOSE: bad_deployment"],
     )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Session ID from /reset. Pass this to support concurrent rollouts.",
+    )
 
 
 # ── Responses ─────────────────────────────────────────────────────────────────
@@ -48,6 +52,7 @@ class ObservationResponse(BaseModel):
     last_argument: Optional[str] = None
     diagnosis_made: bool = False
     resolution_attempted: bool = False
+    session_id: Optional[str] = None   # returned by /reset for session tracking
 
 
 class StepResponse(BaseModel):

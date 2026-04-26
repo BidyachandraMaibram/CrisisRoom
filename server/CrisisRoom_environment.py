@@ -639,10 +639,10 @@ class RewardBreakdown:
 
 def _reward_diagnosis_correct(state: EpisodeState) -> Tuple[float, str]:
     if not state.diagnosis_made or state.diagnosis_value is None:
-        return -1.0, "DIAGNOSE was never called"
+        return -5.0, "DIAGNOSE was never called"
     if diagnosis_matches(state.diagnosis_value, state.true_root_cause):
-        return 4.0, f"Correct: '{state.diagnosis_value}' matches '{state.true_root_cause}'"
-    return -2.0, f"Wrong: '{state.diagnosis_value}' (true: '{state.true_root_cause}')"
+        return 20.0, f"Correct: '{state.diagnosis_value}' matches '{state.true_root_cause}'"
+    return -10.0, f"Wrong: '{state.diagnosis_value}' (true: '{state.true_root_cause}')"
 
 
 def _reward_remediation_correct(state: EpisodeState) -> Tuple[float, str]:
@@ -654,11 +654,11 @@ def _reward_remediation_correct(state: EpisodeState) -> Tuple[float, str]:
     if len(parts) == 2:
         fix_tool, fix_svc = parts
         if fix_tool.replace("_", "") in resolve_lower and fix_svc in resolve_lower:
-            return 5.0, f"Correct: '{state.resolve_value}' matches '{state.correct_fix}'"
+            return 30.0, f"Correct: '{state.resolve_value}' matches '{state.correct_fix}'"
     for tool, arg in state.tools_called:
         if action_matches_fix(tool, arg, state.correct_fix):
-            return 5.0, f"Correct remediation applied: {tool}:{arg}"
-    return -2.0, f"Wrong: '{state.resolve_value}' (correct: '{state.correct_fix}')"
+            return 30.0, f"Correct remediation applied: {tool}:{arg}"
+    return -15.0, f"Wrong: '{state.resolve_value}' (correct: '{state.correct_fix}')"
 
 
 def _reward_causal_reasoning(state: EpisodeState) -> Tuple[float, str]:
@@ -674,17 +674,20 @@ def _reward_causal_reasoning(state: EpisodeState) -> Tuple[float, str]:
     chain_set = {s.lower() for s in state.causal_chain}
     covered = chain_set & checked_before_diagnose
     if covered == chain_set:
-        return 2.0, f"Full causal chain explored: {sorted(covered)}"
-    return 0.0, f"Incomplete: checked {sorted(covered)}, missing {sorted(chain_set - covered)}"
+        return 10.0, f"Full causal chain explored: {sorted(covered)}"
+    if covered:
+        partial = round(10.0 * len(covered) / len(chain_set), 2)
+        return partial, f"Partial: checked {sorted(covered)}, missing {sorted(chain_set - covered)}"
+    return 0.0, f"Causal chain not explored: missing {sorted(chain_set - covered)}"
 
 
 def _reward_efficiency(state: EpisodeState) -> Tuple[float, str]:
     if not state.resolution_attempted:
         return 0.0, "No resolution attempted"
     if state.steps_taken <= 6:
-        return 2.0, f"Efficient: {state.steps_taken} steps (≤6)"
+        return 10.0, f"Efficient: {state.steps_taken} steps (≤6)"
     if state.steps_taken <= 9:
-        return 1.0, f"Acceptable: {state.steps_taken} steps (≤9)"
+        return 5.0, f"Acceptable: {state.steps_taken} steps (≤9)"
     return 0.0, f"Slow: {state.steps_taken} steps (>9)"
 
 
@@ -693,19 +696,19 @@ def _reward_investigation_quality(state: EpisodeState) -> Tuple[float, str]:
     unique = {arg.lower() for t, arg in state.tools_called
               if t in inspect_tools and arg.lower() in set(SERVICES)}
     count = min(len(unique), 5)
-    reward = round(count * 0.3, 2)
+    reward = round(count * 2.0, 2)
     return reward, f"Investigated {count} service(s): {sorted(unique)} → +{reward}"
 
 
 def _reward_red_herring_resistance(state: EpisodeState) -> Tuple[float, str]:
     if state.remediation_on_red_herring_services:
         return 0.0, f"Acted on red-herring service(s): {state.remediation_on_red_herring_services}"
-    return 1.0, "Correctly ignored red herring signals"
+    return 5.0, "Correctly ignored red herring signals"
 
 
 def _reward_timeout_penalty(state: EpisodeState) -> Tuple[float, str]:
     if state.episode_timed_out and not state.resolution_attempted:
-        return -4.0, f"Timed out after {state.steps_taken} steps"
+        return -30.0, f"Timed out after {state.steps_taken} steps"
     return 0.0, "No timeout penalty"
 
 
@@ -719,7 +722,7 @@ def _reward_premature_action_penalty(state: EpisodeState) -> Tuple[float, str]:
             count += 1
     if count == 0:
         return 0.0, "No premature remediation"
-    return float(-count), f"{count} remediation(s) before DIAGNOSE → -{count} penalty"
+    return float(-count * 10), f"{count} remediation(s) before DIAGNOSE → -{count * 10} penalty"
 
 
 def compute_all_rewards(state: EpisodeState) -> RewardBreakdown:

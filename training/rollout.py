@@ -170,10 +170,16 @@ class CrisisRoomClient:
         }
         r = self.session.post(f"{self.base_url}/reset", json=payload, timeout=30)
         r.raise_for_status()
-        return r.json()
+        obs = r.json()
+        # Store session_id so every subsequent step() is isolated
+        self._session_id = obs.get("session_id")
+        return obs
 
     def step(self, action: str) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
         payload = {"action": action}
+        # Include session_id so the server routes to our isolated env instance
+        if hasattr(self, "_session_id") and self._session_id:
+            payload["session_id"] = self._session_id
         r = self.session.post(f"{self.base_url}/step", json=payload, timeout=30)
         r.raise_for_status()
         data = r.json()

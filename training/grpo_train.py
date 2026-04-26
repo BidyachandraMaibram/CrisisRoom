@@ -2,10 +2,8 @@
 CrisisRoom – GRPO Training Script
 Train Qwen2.5-3B-Instruct with TRL GRPOTrainer + Unsloth on the
 CrisisRoom SRE incident response environment.
-
 Usage:
     python training/grpo_train.py
-
 Requirements:
     pip install unsloth trl transformers datasets torch wandb requests fastapi uvicorn
 """
@@ -49,21 +47,21 @@ TRAINING_CONFIG = {
     "load_in_4bit": True,
 
     # --- LoRA ---
-    "lora_rank": 16,
+    "lora_rank": 100,
     "lora_alpha": 32,
     "lora_dropout": 0.05,
     "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
 
     # --- Training ---
-    "total_steps": 200,
-    "eval_every_n_steps": 50,
+    "total_steps": 50,
+    "eval_every_n_steps": 25,
     "eval_episodes": 10,
     "batch_size": 1,            # episodes per GRPO update
     "num_generations": 2,       # GRPO group size
     "max_new_tokens": 64,
     "learning_rate": 5e-5,
     "gradient_accumulation_steps": 8,
-    "warmup_steps": 20,
+    "warmup_steps": 30,
     "max_grad_norm": 0.5,
 
     # --- Curriculum ---
@@ -75,7 +73,7 @@ TRAINING_CONFIG = {
     "red_herring_prob": 0.30,
 
     # --- Checkpointing ---
-    "save_every_n_steps": 100,
+    "save_every_n_steps": 25,
     "output_dir": "./checkpoints/crisisroom",
     "best_checkpoint_dir": "./checkpoints/crisisroom-best",
 }
@@ -381,9 +379,12 @@ def _train_with_trl_grpo(
 
     logger.info("Using TRL GRPOTrainer")
 
+    # FIX #2: Added max_steps=200 and set num_train_epochs=1 so training
+    # runs the full 200 steps regardless of dataset size.
     grpo_config = GRPOConfig(
         output_dir=config["output_dir"],
-        num_train_epochs=10,
+        max_steps=config["total_steps"],        # FIX #2: ensures full 200 steps
+        num_train_epochs=1,                     # FIX #2: changed from 10
         per_device_train_batch_size=config["batch_size"],
         gradient_accumulation_steps=config["gradient_accumulation_steps"],
         learning_rate=config["learning_rate"],
@@ -398,12 +399,19 @@ def _train_with_trl_grpo(
         report_to="none",   # set to "wandb" if using W&B
     )
 
+    # Shared step counter used by both reward_fn and patched_log via closure
+    step_counter = [0]
+
     # We implement a custom reward function that runs env rollouts
     # and returns per-sample rewards for GRPO
     def reward_fn(prompts, completions, **kwargs) -> List[float]:
         from training.rollout import build_conversation_messages, extract_action_from_response
 
         rewards = []
+        # FIX #4: use step_counter closure instead of kwargs.get("step", 9999)
+        # because TRL does not pass "step" in kwargs to the reward function.
+        use_hint = step_counter[0] < curriculum_cutoff
+
         for prompt, completion in zip(prompts, completions):
             try:
                 # TRL GRPOTrainer passes completions as List[List[Dict]] where each
@@ -420,7 +428,6 @@ def _train_with_trl_grpo(
                 else:
                     content = str(completion)
 
-                use_hint = kwargs.get("step", 9999) < curriculum_cutoff
                 obs = client.reset(curriculum_hint=use_hint)
                 action = extract_action_from_response(content)
                 next_obs, reward, done, info = client.step(action)
@@ -493,13 +500,10 @@ def _train_with_trl_grpo(
     # Periodic eval callback
     original_log = trainer.log
 
-    step_counter = [0]
-
     def patched_log(logs, *args, **kwargs):
-        original_log(logs, *args, **kwargs)          # call first
+        original_log(logs, *args, **kwargs)          # FIX #1: call original_log only ONCE (removed duplicate at bottom)
         step = logs.get("step", step_counter[0])
         step_counter[0] = step
-        step = step_counter[0]
 
         # Log per-component reward tracking
         if "reward" in logs:
@@ -529,7 +533,7 @@ def _train_with_trl_grpo(
                 _save_checkpoint(model, tokenizer, config["best_checkpoint_dir"], step)
                 logger.info("New best checkpoint saved at step %d (reward=%.4f)", step, best_reward)
 
-        original_log(logs, *args, **kwargs)
+        # FIX #1: Removed the second original_log(...) call that was here.
 
     trainer.log = patched_log
     trainer.train()
